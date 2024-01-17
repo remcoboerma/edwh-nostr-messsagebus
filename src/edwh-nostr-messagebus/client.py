@@ -50,16 +50,20 @@ class OLClient:
         direct(self, to_keys: Keys, payload: Any, tags: Iterable[str] = ()) -> None:
             Sends a direct message to the specified recipient.
     """
+
     client: Client | ClientPool
     keys: Keys
     # list to store the clients in for ctrl c handlers
     _all_clients = []
     domain_handler: list[Callable[[str, Event], None]]
 
-    def __init__(self, relay: str, keys: Keys,
-                 domain_handlers: Iterable[Callable[[str, Event], None]] = (),
-                 lookback: datetime.timedelta | None = None
-                 ) -> None:
+    def __init__(
+        self,
+        relay: str,
+        keys: Keys,
+        domain_handlers: Iterable[Callable[[str, Event], None]] = (),
+        lookback: datetime.timedelta | None = None,
+    ) -> None:
         """
         Initializes a new instance of the class, creates a new ClientPool as self.client.
 
@@ -72,31 +76,37 @@ class OLClient:
         self.relay = relay
         self.keys = keys
         self.lookback = lookback or datetime.timedelta(0)
-        self.client = ClientPool(clients=[self.relay],
-                                 on_auth=self.on_auth,
-                                 on_connect=self.on_connect if domain_handlers else None,
-                                 read=True,
-                                 write=True)
+        self.client = ClientPool(
+            clients=[self.relay],
+            on_auth=self.on_auth,
+            on_connect=self.on_connect if domain_handlers else None,
+            read=True,
+            write=True,
+        )
         self._all_clients.append(self.client)
         self.domain_handlers = domain_handlers
 
     def on_connect(self, client: Client) -> None:
-        logging.debug('OLClient connected')
+        logging.debug("OLClient connected")
         # filters can be alist of dicts, meaning they are ORed.
         # the first filters direct messages to this pubkey (plaintext and encrypted text notes)
         # the second reads all unencrypted text-notes from everyone, that the relay allows us to read.
-        client.subscribe(type(self).__name__,
-                         handlers=[self],
-                         filters=[{
-                             'kinds': [Event.KIND_ENCRYPT, Event.KIND_TEXT_NOTE],
-                             '#p': [self.keys.public_key_hex()],
-                             'since': int((datetime.datetime.now() - self.lookback).timestamp())
-                         }, {
-                             'kinds': [Event.KIND_TEXT_NOTE],
-                             'since': int((datetime.datetime.now() - self.lookback).timestamp())
-                         }]
-                         )
-        logging.debug('OLClient subscribed')
+        client.subscribe(
+            type(self).__name__,
+            handlers=[self],
+            filters=[
+                {
+                    "kinds": [Event.KIND_ENCRYPT, Event.KIND_TEXT_NOTE],
+                    "#p": [self.keys.public_key_hex()],
+                    "since": int((datetime.datetime.now() - self.lookback).timestamp()),
+                },
+                {
+                    "kinds": [Event.KIND_TEXT_NOTE],
+                    "since": int((datetime.datetime.now() - self.lookback).timestamp()),
+                },
+            ],
+        )
+        logging.debug("OLClient subscribed")
 
     def do_event(self, client: Client, name: str, event: Event) -> None:
         """
@@ -123,21 +133,26 @@ class OLClient:
         :return: the response text
         :rtype: str
         """
-        return event.content if event.kind == Event.KIND_TEXT_NOTE else Event.decrypted_content(
-            priv_key=self.keys.private_key_hex(), pub_key=event.pub_key)
+        return (
+            event.content
+            if event.kind == Event.KIND_TEXT_NOTE
+            else Event.decrypted_content(
+                priv_key=self.keys.private_key_hex(), pub_key=event.pub_key
+            )
+        )
 
     def on_auth(self, client: Client, challenge: str):
         """Sign the challenge with the keys to authorize the client."""
-        logging.info('OLClient authenticating')
+        logging.info("OLClient authenticating")
         # noinspection PyTypeChecker
         client.auth(self.keys, challenge)
 
     async def run(self) -> typing.Awaitable:
-        """Pass-thru to the client's run method. """
+        """Pass-thru to the client's run method."""
         return self.client.run()
 
     def end(self) -> None:
-        """Pass-thru to the client's end method. """
+        """Pass-thru to the client's end method."""
         self.client.end()
 
     def broadcast(self, payload: Any, tags: Iterable[str] = (), public: bool = True):
@@ -161,15 +176,23 @@ class OLClient:
             The payload will be converted to a JSON string and signed with the client's private key before publishing.
         """
         if not public and not tags:
-            raise ValueError('Cannot send encrypted messages without knowing the recipient.')
+            raise ValueError(
+                "Cannot send encrypted messages without knowing the recipient."
+            )
 
-        n_event = Event(kind=Event.KIND_TEXT_NOTE if public else Event.KIND_ENCRYPT,
-                        content=json.dumps(payload),
-                        pub_key=self.keys.public_key_hex(),
-                        tags=tags)
+        n_event = Event(
+            kind=Event.KIND_TEXT_NOTE if public else Event.KIND_ENCRYPT,
+            content=json.dumps(payload),
+            pub_key=self.keys.public_key_hex(),
+            tags=tags,
+        )
         n_event.sign(self.keys.private_key_hex())
-        logging.debug(f'Broadcasting {json.dumps(payload)} with {tags} {"public" if public else "privately"}')
-        logging.info(f'Broadcasting {repr(payload)} {"publicly" if public else "privately"}')
+        logging.debug(
+            f'Broadcasting {json.dumps(payload)} with {tags} {"public" if public else "privately"}'
+        )
+        logging.info(
+            f'Broadcasting {repr(payload)} {"publicly" if public else "privately"}'
+        )
         self.client.publish(n_event)
 
     def direct(self, to_keys: Keys, payload: Any, tags: Iterable[str] = ()):
@@ -189,7 +212,7 @@ class OLClient:
             The `tags` will be modified to include a tag indicating the recipient's public key.
             The payload will be broadcasted using the `broadcast` method of the client.
         """
-        tags = [['p', to_keys.public_key_hex()]] + list(tags)
+        tags = [["p", to_keys.public_key_hex()]] + list(tags)
         self.broadcast(payload, tags)
 
 
@@ -218,7 +241,9 @@ async def shutdown_on_signal(sig, loop, client: OLClient):
     await cleanup(sig, loop, client)
 
 
-def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[str, str]]):
+def send_and_disconnect(
+    relay: str | list[str], keys: Keys, messages: list[dict[str, str]]
+):
     """
     This method establishes a connection with the specified relay(s) using the provided keys, sends the given messages,
     and then disconnects from the relay(s). It uses the OLClient class to handle the communication with the relay(s).
@@ -251,17 +276,21 @@ def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[
 
         :return: None
         """
-        if hasattr(client.client, '._publish_q'):
+        if hasattr(client.client, "._publish_q"):
             client_queues = [client.client._publish_q]
         else:
-            client_queues = [_['client']._publish_q for _ in client.client._clients.values()]
+            client_queues = [
+                _["client"]._publish_q for _ in client.client._clients.values()
+            ]
 
-        logging.debug(f'monitoring {len(client_queues)} queues if they are ready to quit')
+        logging.debug(
+            f"monitoring {len(client_queues)} queues if they are ready to quit"
+        )
         while total_open_connections := sum(_.qsize() for _ in client_queues):
-            logging.debug(f'Waiting for {total_open_connections} to close.')
+            logging.debug(f"Waiting for {total_open_connections} to close.")
             await asyncio.sleep(0.3)
 
-        logging.debug('requesting client to release the connection')
+        logging.debug("requesting client to release the connection")
         client.end()
 
     async def connect_execute_and_die():
@@ -271,7 +300,9 @@ def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[
         loop = asyncio.get_event_loop()
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
-            loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client)))
+            loop.add_signal_handler(
+                s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
+            )
 
         client_task = await asyncio.create_task(client.run())
         for message in messages:
@@ -285,8 +316,12 @@ def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[
     asyncio.run(connect_execute_and_die())
 
 
-def listen_forever(keys: Keys, relay: list[str] | str, lookback: int = 0,
-                   domain_handlers: Iterable[Callable[[str, Event], None]] = ()):
+def listen_forever(
+    keys: Keys,
+    relay: list[str] | str,
+    lookback: int = 0,
+    domain_handlers: Iterable[Callable[[str, Event], None]] = (),
+):
     """
     Start listening for events indefinitely.
 
@@ -308,7 +343,9 @@ def listen_forever(keys: Keys, relay: list[str] | str, lookback: int = 0,
         loop = asyncio.get_event_loop()
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
-            loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client)))
+            loop.add_signal_handler(
+                s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
+            )
 
         await asyncio.create_task(await client.run())
 
