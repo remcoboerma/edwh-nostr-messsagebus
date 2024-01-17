@@ -1,23 +1,14 @@
-import asyncio
 import copy
-import fileinput
-import signal
-from asyncio import TaskGroup
-from pathlib import Path
-from uuid import UUID
-
-from invoke import task
 import json
-import pprint
-import os
-import edwh
-from typing import Iterable, Any
-from monstr.encrypt import Keys
-from monstr.client.client import ClientPool, Client
-from monstr.event.event import Event
-from client import OLClient, send_and_disconnect, listen_forever
-import datetime
 import logging
+import pprint
+
+import edwh
+from invoke import task
+from monstr.encrypt import Keys
+from monstr.event.event import Event
+
+from client import send_and_disconnect, listen_forever
 
 
 class ConfigurationError(Exception): pass
