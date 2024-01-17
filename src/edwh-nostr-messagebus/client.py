@@ -1,34 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-  Simple json dump of the event viewer demonstrating
-  how easy it is to play around with the events read
-  from nostr without having to implement a full client.
-
-    Usage when you use a config file:
-        $ ./python3 event_view.py -o json | ./event_view_consumer.py
-
-    or, if you want to use a specific  nostr relay instance:
-        $ python3 event_view.py -r wss://nos.lol -o json | python3 event_view_consumer.py
-"""
-
-import sys
-import signal
 import asyncio
 import datetime
-import typing
-
-import aioconsole
-import fileinput
 import json
-import pprint
-import os
+import signal
+import typing
 from typing import Iterable, Any, Callable
-from monstr.encrypt import Keys
-from monstr.client.client import ClientPool, Client
-from monstr.event.event import Event
-from monstr.util import ConfigError
 import logging
+
+from monstr.client.client import ClientPool, Client
+from monstr.encrypt import Keys
+from monstr.event.event import Event
 
 
 class OLClient:
@@ -45,7 +27,7 @@ class OLClient:
         self.relay = relay
         self.keys = keys
         self.lookback = lookback or datetime.timedelta(0)
-        self.client = Client(relay_url=self.relay,
+        self.client = ClientPool(clients=[self.relay],
                              on_auth=self.on_auth,
                              on_connect=self.on_connect if domain_handlers else None,
                              read=True,
@@ -54,7 +36,10 @@ class OLClient:
         self.domain_handlers = domain_handlers
 
     def on_connect(self, client: Client) -> None:
-        print('connected')
+        logging.debug('OLClient connected')
+        # filters can be alist of dicts, meaning they are ORed.
+        # the first filters direct messages to this pubkey (plaintext and encrypted text notes)
+        # the second reads all unencrypted text-notes from everyone, that the relay allows us to read.
         client.subscribe(type(self).__name__,
                          handlers=[self],
                          filters=[{
@@ -62,12 +47,11 @@ class OLClient:
                              '#p': [self.keys.public_key_hex()],
                              'since': int((datetime.datetime.now() - self.lookback).timestamp())
                          }, {
-                             'kinds': [Event.KIND_ENCRYPT,
-                                       Event.KIND_TEXT_NOTE],
+                             'kinds': [Event.KIND_TEXT_NOTE],
                              'since': int((datetime.datetime.now() - self.lookback).timestamp())
                          }]
                          )
-        print('subscribed')
+        logging.debug('OLClient subscribed')
 
     def do_event(self, client: Client, name: str, event: Event) -> None:
         for handler in self.domain_handlers:
@@ -84,12 +68,11 @@ class OLClient:
 
     def on_auth(self, client: Client, challenge: str):
         """Sign the challenge with the keys to authorize the client."""
-        print('on_auth')
+        logging.info('OLClient authenticating')
         # noinspection PyTypeChecker
         client.auth(self.keys, challenge)
 
     async def run(self) -> typing.Awaitable:
-        print('started!!')
         return self.client.run()
 
     def end(self) -> None:
@@ -115,7 +98,6 @@ class OLClient:
             If `public` is False, the message will be encrypted and require tags indicating the recipient.
             The payload will be converted to a JSON string and signed with the client's private key before publishing.
         """
-        print('broadcast')
         if not public and not tags:
             raise ValueError('Cannot send encrypted messages without knowing the recipient.')
 
@@ -124,6 +106,8 @@ class OLClient:
                         pub_key=self.keys.public_key_hex(),
                         tags=tags)
         n_event.sign(self.keys.private_key_hex())
+        logging.debug(f'Broadcasting {json.dumps(payload)} with {tags} {"public" if public else "privately"}')
+        logging.info(f'Broadcasting {repr(payload)} {"publicly" if public else "privately"}')
         self.client.publish(n_event)
 
     def direct(self, to_keys: Keys, payload: Any, tags: Iterable[str] = ()):
@@ -145,3 +129,102 @@ class OLClient:
         """
         tags = [['p', to_keys.public_key_hex()]] + list(tags)
         self.broadcast(payload, tags)
+
+
+cleanup_done_event = asyncio.Event()
+
+
+async def cleanup(signal_, loop, client:OLClient):
+    print(f"Received exit signal {signal_.name}...")
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+
+    client.end()
+
+    await asyncio.sleep(0.5)
+
+    for task in tasks:
+        task.cancel()
+
+    print("Cancelling tasks, waiting for them to finish...")
+    await asyncio.gather(*tasks, return_exceptions=True)
+    print("Tasks finished cancelling.")
+    cleanup_done_event.set()
+
+
+async def shutdown_on_signal(sig, loop, client:OLClient):
+    print(f"Received shutdown signal {sig}...")
+    await cleanup(sig, loop, client)
+
+
+def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[str, str]]):
+    """
+    Sends messages over the relay, waits for the client to finish all events,
+    and closes the connection.
+    """
+    logging.basicConfig(level=logging.DEBUG)
+    client = OLClient(
+        relay=relay,
+        keys=keys,
+        domain_handlers=[],
+    )
+
+    async def wait_for_empty_queue():
+        if hasattr(client.client, '._publish_q'):
+            client_queues = [client.client._publish_q]
+        else:
+            client_queues = [_['client']._publish_q for _ in client.client._clients.values()]
+
+        logging.debug(f'monitoring {len(client_queues)} queues if they are ready to quit')
+        while total_open_connections := sum(_.qsize() for _ in client_queues):
+            logging.debug(f'Waiting for {total_open_connections} to close.')
+            await asyncio.sleep(0.3)
+
+        logging.debug('requesting client to release the connection')
+        client.end()
+
+    async def connect_execute_and_die():
+
+        loop = asyncio.get_event_loop()
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client)))
+
+
+        client_task = await asyncio.create_task(client.run())
+        for message in messages:
+            client.broadcast(message)
+        stop_task = asyncio.create_task(wait_for_empty_queue())
+        await client_task
+        await stop_task
+        cleanup_done_event.set()
+        await cleanup_done_event.wait()
+
+    asyncio.run(connect_execute_and_die())
+
+
+def listen_forever(keys:Keys, relay:list[str]|str, lookback:int=0, domain_handlers:Iterable[Callable[[str, Event], None]] = ()):
+    """
+    Connect to the relay, listening for messages.
+    """
+    logging.basicConfig(level=logging.INFO)
+    client = OLClient(
+        relay=relay,
+        lookback=datetime.timedelta(seconds=lookback),
+        keys=keys,
+        domain_handlers=domain_handlers,
+    )
+
+    async def run_services():
+        loop = asyncio.get_event_loop()
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client)))
+
+        await asyncio.create_task(await client.run())
+
+        cleanup_done_event.set()
+        await cleanup_done_event.wait()
+
+
+
+    asyncio.run(run_services())

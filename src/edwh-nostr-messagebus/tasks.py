@@ -15,19 +15,12 @@ from typing import Iterable, Any
 from monstr.encrypt import Keys
 from monstr.client.client import ClientPool, Client
 from monstr.event.event import Event
-from client import OLClient
+from client import OLClient, send_and_disconnect, listen_forever
 import datetime
 import logging
 
 
 class ConfigurationError(Exception): pass
-
-
-class Config:
-    relay = os.getenv('NOSTR_RELAY', 'ws://127.0.0.1:8888')
-    private_key = os.getenv('NOSTR_PRIVKEY')
-    # convert the nsec private key to Key object or createa a new keypair using Keys()
-    keys = Keys(private_key) if private_key else Keys()
 
 
 @task()
@@ -60,15 +53,6 @@ def print_friendly_keyname_handler(js: str, event: Event) -> None:
     print(f'---[from: {name_or_key}]-------------')
 
 
-def clean_exit(clients: list[OLClient]) -> None:
-    # exit cleanly on ctrl c
-    def sigint_handler(signal, frame):
-        print('stopping...')
-        for olclient in clients:
-            olclient.end()
-        exit(0)
-
-    signal.signal(signal.SIGINT, sigint_handler)
 
 
 def parse_key(keyname_or_bech32: str | None) -> Keys:
@@ -76,11 +60,13 @@ def parse_key(keyname_or_bech32: str | None) -> Keys:
         # in the case of None, always the privkey in the dotenv
         try:
             return parse_key(edwh.read_dotenv()['PRIVKEY'])
-        except KeyError:
-            raise ConfigurationError('PRIVKEY not found in .env, try running `inv setup`. ')
+        except KeyError as e:
+            raise ConfigurationError(
+                'PRIVKEY not found in .env, try running `inv setup`. '
+            ) from e
     try:
         return Keys(keyname_or_bech32)
-    except:
+    except Exception:
         return Keys(edwh.read_dotenv()[keyname_or_bech32.upper()])
 
 
@@ -92,38 +78,13 @@ def new(ctx, gidname, key=None):
     Simulates a new object and sends the message over the relay,
     waiting for the client to finish all events and closes the connection.
     """
-    keys = parse_key(key)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
+
     env = edwh.read_dotenv()
-    client = OLClient(
-        relay=env['RELAY'],
-        keys=keys,
-        domain_handlers=[],
-    )
-    clean_exit([client])
-
-    async def wait_for_empty_queue():
-        while client.client._publish_q.qsize():
-            await asyncio.sleep(0.1)
-        print('requesting end')
-        client.end()
-
-    async def connect_and_obey():
-        # print('running client')
-        client_task = await asyncio.create_task(client.run())
-        # print('client is running, broadcasting')
-        for _ in gidname:
-            gid, name = _.split(':')
-            client.broadcast(dict(gid=gid, name=name))
-        # print('post create task')
-        stop_task = asyncio.create_task(wait_for_empty_queue())
-        dir(stop_task)
-        # print('waiting to complete')
-        await client_task
-        # print('awaiting stop task')
-        await stop_task
-
-    asyncio.run(connect_and_obey())
+    relay = env['RELAY']
+    keys = parse_key(key or env['PRIVKEY'])
+    messages = [{'gid': gid, 'name': name} for gid, name in [_.split(':') for _ in gidname]]
+    send_and_disconnect(relay, keys, messages)
 
 
 @task()
@@ -131,22 +92,12 @@ def connect(context, key=None):
     """
     Connect to the relay, listening for messages.
     """
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     keys = parse_key(key)
     env = edwh.read_dotenv()
-    client = OLClient(
-        relay=env['RELAY'],
-        lookback=datetime.timedelta(seconds=int(env['LOOKBACK'])),
-        keys=keys,
-        domain_handlers=[print_friendly_keyname_handler, print_event_handler],
-    )
+    listen_forever(keys, env['RELAY'], int(env['LOOKBACK']),
+                   domain_handlers=[print_friendly_keyname_handler, print_event_handler])
 
-    clean_exit([client])
-
-    async def run_services():
-        await asyncio.create_task(await client.run())
-
-    asyncio.run(run_services())
 
 
 @task()
