@@ -8,7 +8,7 @@ from invoke import task
 from monstr.encrypt import Keys
 from monstr.event.event import Event
 
-from client import send_and_disconnect, listen_forever
+from client import send_and_disconnect, listen_forever, OLClient
 
 
 class ConfigurationError(Exception):
@@ -45,7 +45,7 @@ def setup(ctx):
         )
 
 
-def pprint_handler(js: str, event: Event) -> None:
+def pprint_handler(client: OLClient, js: str, event: Event) -> None:
     """
     Pretty prints the JSON contents of the event, for troubleshooting business events.
 
@@ -56,7 +56,7 @@ def pprint_handler(js: str, event: Event) -> None:
     pprint.pprint(json.loads(js), indent=2, width=120, sort_dicts=True)
 
 
-def print_event_handler(js: str, event: Event) -> None:
+def print_event_handler(client: OLClient, js: str, event: Event) -> None:
     """
     Prints the objects using pprinted reprs, for troubleshooting nostr events.
     """
@@ -65,7 +65,15 @@ def print_event_handler(js: str, event: Event) -> None:
     pprint.pprint(e, indent=2, width=120, sort_dicts=True)
 
 
-def print_friendly_keyname_handler(js: str, event: Event) -> None:
+def camelcase_name_handler(client: OLClient, js: str, event: Event) -> None:
+    js = json.loads(js)
+    if (better_name := js["name"].capitalize()) != js["name"]:
+        # republish using a captialized name
+        js["name"] = better_name
+        client.broadcast(js, tags=[["better", True]])
+
+
+def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> None:
     """
     Print friendly keynames handler in a banner before the next handler fires, based on the .env file.
     """
@@ -151,7 +159,11 @@ def connect(context, key=None):
         keys,
         env["RELAY"],
         int(env["LOOKBACK"]),
-        domain_handlers=[print_friendly_keyname_handler, print_event_handler],
+        domain_handlers=[
+            print_friendly_keyname_handler,
+            print_event_handler,
+            camelcase_name_handler,
+        ],
     )
 
 

@@ -119,7 +119,7 @@ class OLClient:
         """
         for handler in self.domain_handlers:
             try:
-                handler(self.get_response_text(event), event)
+                handler(self, self.get_response_text(event), event)
             except Exception as e:
                 print(e)
                 raise
@@ -155,7 +155,12 @@ class OLClient:
         """Pass-thru to the client's end method."""
         self.client.end()
 
-    def broadcast(self, payload: Any, tags: Iterable[str] = (), public: bool = True):
+    def broadcast(
+        self,
+        payload: Any,
+        tags: Iterable[Iterable[str | Any]] | str = (),
+        public: bool = True,
+    ):
         """
         Broadcasts a message to the Nostr message bus.
 
@@ -300,6 +305,7 @@ def send_and_disconnect(
         loop = asyncio.get_event_loop()
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
+            # noinspection PyUnresolvedReferences
             loop.add_signal_handler(
                 s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
             )
@@ -343,6 +349,7 @@ def listen_forever(
         loop = asyncio.get_event_loop()
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
+            # noinspection PyUnresolvedReferences
             loop.add_signal_handler(
                 s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
             )
