@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.0 (2024-01-18)
+### Feature
+* Update event handlers and improve message broadcasting ([`15b54ee`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/15b54ee187d94b623b3f2089ebccf5f9db2a9322))
+
 ## v0.1.0 (2024-01-17)
 ### Feature
 * Refactor message sending and receiving in OLClient ([`58ed1f6`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/58ed1f64d757df81a5bf2dd9baa2bc8ffd95388e))
