@@ -65,14 +65,6 @@ def print_event_handler(client: OLClient, js: str, event: Event) -> None:
     pprint.pprint(e, indent=2, width=120, sort_dicts=True)
 
 
-def camelcase_name_handler(client: OLClient, js: str, event: Event) -> None:
-    js = json.loads(js)
-    if (better_name := js["name"].capitalize()) != js["name"]:
-        # republish using a captialized name
-        js["name"] = better_name
-        client.broadcast(js, tags=[["better", True]])
-
-
 def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> None:
     """
     Print friendly keynames handler in a banner before the next handler fires, based on the .env file.
@@ -130,13 +122,14 @@ def parse_key(keyname_or_bech32: str | None) -> Keys:
         "gidname": "formatted as 'gid:name', can be used multiple times",
         "key": "(friendly) private key",
     },
+    incrementable="verbose",
 )
-def new(ctx, gidname, key=None):
+def new(ctx, gidname, key=None, verbose=1):
     """
     Simulates a new object and sends the message over the relay,
     waiting for the client to finish all events and closes the connection.
     """
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
 
     env = edwh.read_dotenv()
     relay = env["RELAY"]
@@ -147,12 +140,12 @@ def new(ctx, gidname, key=None):
     send_and_disconnect(relay, keys, messages)
 
 
-@task()
-def connect(context, key=None):
+@task(incrementable=["verbose"])
+def connect(context, key=None, verbose=1):
     """
     Connect to the relay, listening for messages printing friendly names and message values.
     """
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
     keys = parse_key(key)
     env = edwh.read_dotenv()
     listen_forever(
@@ -162,6 +155,34 @@ def connect(context, key=None):
         domain_handlers=[
             print_friendly_keyname_handler,
             print_event_handler,
+        ],
+    )
+
+
+@task(incrementable=["verbose"])
+def camelcaser(context, key=None, verbose=1):
+    """
+    Connect to the relay, listening for messages printing friendly names and message values.
+    """
+    logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
+    keys = parse_key(key)
+    env = edwh.read_dotenv()
+
+    def camelcase_name_handler(client: OLClient, js: str, event: Event) -> None:
+        js = json.loads(js)
+        if (better_name := js["name"].capitalize()) != js["name"]:
+            # republish using a captialized name
+            logging.info(
+                f'Camelcasing {js["name"]} to {better_name} for messageid:{event._id}'
+            )
+            js["name"] = better_name
+            client.broadcast(js, tags=[["better", True]])
+
+    listen_forever(
+        keys,
+        env["RELAY"],
+        int(env["LOOKBACK"]),
+        domain_handlers=[
             camelcase_name_handler,
         ],
     )

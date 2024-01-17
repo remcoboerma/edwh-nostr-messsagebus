@@ -326,7 +326,7 @@ def listen_forever(
     keys: Keys,
     relay: list[str] | str,
     lookback: int = 0,
-    domain_handlers: Iterable[Callable[[str, Event], None]] = (),
+    domain_handlers: Iterable[Callable[[OLClient, str, Event], None]] = (),
 ):
     """
     Start listening for events indefinitely.
