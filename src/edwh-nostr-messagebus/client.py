@@ -246,6 +246,11 @@ def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[
     )
 
     async def wait_for_empty_queue():
+        """
+        Wait until all queues are empty before disconnecting the client.
+
+        :return: None
+        """
         if hasattr(client.client, '._publish_q'):
             client_queues = [client.client._publish_q]
         else:
@@ -260,7 +265,9 @@ def send_and_disconnect(relay: str | list[str], keys: Keys, messages: list[dict[
         client.end()
 
     async def connect_execute_and_die():
-
+        """
+        Connects to a relay, sends a set of messages, waits for them to be sent and terminates the connection.
+        """
         loop = asyncio.get_event_loop()
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
