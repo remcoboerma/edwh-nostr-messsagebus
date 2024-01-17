@@ -17,9 +17,10 @@ class ConfigurationError(Exception): pass
 @task()
 def setup(ctx):
     edwh.check_env('RELAY', 'ws://127.0.0.1:8888', 'What NOSTR relay to connect to')
-    edwh.check_env('PRIVKEY', Keys().private_key_bech32(), 'What NOSTR relay to connect to')
+    edwh.check_env('PRIVKEY', Keys().private_key_bech32(), 'Default privkey when none specified')
     edwh.check_env('LOOKBACK', '0', 'How many seconds to look back for messages when listening to nostr.')
-
+    for keyname in ['platform-a','platform-b','slo','nsmv','producer-a', 'producer-b']:
+        edwh.check_env(keyname.upper(),Keys().private_key_bech32(),f'this demo needs keys for identity {keyname}')
 
 def pprint_handler(js: str, event: Event) -> None:
     pprint.pprint(json.loads(js), indent=2, width=120, sort_dicts=True)
