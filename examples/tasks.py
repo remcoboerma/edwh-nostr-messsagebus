@@ -8,7 +8,7 @@ from invoke import task
 from monstr.encrypt import Keys
 from monstr.event.event import Event
 
-from client import send_and_disconnect, listen_forever, OLClient
+from edwh_nostr_messagebus.client import send_and_disconnect, listen_forever, OLClient
 
 
 class ConfigurationError(Exception):
