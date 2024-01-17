@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.0 (2024-01-18)
+### Feature
+* Refactor verbose logging and separate camelcase handler ([`0b504da`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/0b504da0e20f97a510207428bbe8532062ae89c2))
+
 ## v0.2.0 (2024-01-18)
 ### Feature
 * Update event handlers and improve message broadcasting ([`15b54ee`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/15b54ee187d94b623b3f2089ebccf5f9db2a9322))
