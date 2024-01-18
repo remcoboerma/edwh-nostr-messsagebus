@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.4.0 (2024-01-18)
+### Feature
+* Add jstagtest task and update message broadcasting function to support Event objects. ([`8d337ac`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/8d337ac13e860c700d34f1f99795878a3da5b308))
+
 ## v0.3.1 (2024-01-18)
 ### Fix
 * Rename 'edwh-nostr-messagebus' to 'edwh_nostr_messagebus' ([`869bcdf`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/869bcdfb80f7bc65a0a151888afd7dc7059657ab))
