@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import pprint
+import uuid
 
 import edwh
 from invoke import task
@@ -138,6 +139,29 @@ def new(ctx, gidname, key=None, verbose=1):
         {"gid": gid, "name": name} for gid, name in [_.split(":") for _ in gidname]
     ]
     send_and_disconnect(relay, keys, messages)
+
+
+@task(
+    incrementable="verbose",
+)
+def jstagtest(ctx, key=None, verbose=1):
+    """
+    """
+    logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
+
+    env = edwh.read_dotenv()
+    relay = env["RELAY"]
+    keys = parse_key(key or env["PRIVKEY"])
+    messages = [Event(
+        kind=Event.KIND_TEXT_NOTE,
+        content='Menselijke beschrijving',
+        pub_key=keys.public_key_hex(),
+        tags=[['olgid',f'gid://edwh/{uuid.uuid4()}'],
+              ['meta',json.dumps(dict(hier='komt_wat',informatie='in die',nested=dict(kan='zijn',maar='dat hoeft niet',exl='!')))]]
+    )]
+    send_and_disconnect(relay, keys, messages)
+
+
 
 
 @task(incrementable=["verbose"])

@@ -157,7 +157,7 @@ class OLClient:
 
     def broadcast(
         self,
-        payload: Any,
+            payload: Any | Event,
         tags: Iterable[Iterable[str | Any]] | str = (),
         public: bool = True,
     ):
@@ -165,7 +165,7 @@ class OLClient:
         Broadcasts a message to the Nostr message bus.
 
         Args:
-            payload: The payload to be broadcasted.
+            payload: The payload to be broadcasted, either a prefilled Event or an Event instance
             tags: Optional iterable of tags associated with the payload.
             public: Flag indicating whether the message should be public or encrypted.
 
@@ -184,16 +184,18 @@ class OLClient:
             raise ValueError(
                 "Cannot send encrypted messages without knowing the recipient."
             )
-
-        n_event = Event(
-            kind=Event.KIND_TEXT_NOTE if public else Event.KIND_ENCRYPT,
-            content=json.dumps(payload),
-            pub_key=self.keys.public_key_hex(),
-            tags=tags,
-        )
+        if isinstance(payload, Event):
+            n_event = payload
+        else:
+            n_event = Event(
+                kind=Event.KIND_TEXT_NOTE if public else Event.KIND_ENCRYPT,
+                content=json.dumps(payload),
+                pub_key=self.keys.public_key_hex(),
+                tags=tags,
+            )
         n_event.sign(self.keys.private_key_hex())
         logging.debug(
-            f'Broadcasting {json.dumps(payload)} with {tags} {"public" if public else "privately"}'
+            f'Broadcasting {repr(payload)} with {tags} {"public" if public else "privately"}'
         )
         logging.info(
             f'Broadcasting {repr(payload)} {"publicly" if public else "privately"}'
@@ -247,7 +249,7 @@ async def shutdown_on_signal(sig, loop, client: OLClient):
 
 
 def send_and_disconnect(
-    relay: str | list[str], keys: Keys, messages: list[dict[str, str]]
+        relay: str | list[str], keys: Keys, messages: list[dict[str, str] | Event]
 ):
     """
     This method establishes a connection with the specified relay(s) using the provided keys, sends the given messages,
