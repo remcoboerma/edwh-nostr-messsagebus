@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.4.1 (2024-01-18)
+### Fix
+* Modify object printing ([`ae9ea3e`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/ae9ea3e88ba9176626b2ace3ba79d420e2aab51a))
+
 ## v0.4.0 (2024-01-18)
 ### Feature
 * Add jstagtest task and update message broadcasting function to support Event objects. ([`8d337ac`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/8d337ac13e860c700d34f1f99795878a3da5b308))
