@@ -2,6 +2,13 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.1 (2024-01-18)
+### Fix
+* Rename 'edwh-nostr-messagebus' to 'edwh_nostr_messagebus' ([`869bcdf`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/869bcdfb80f7bc65a0a151888afd7dc7059657ab))
+
+### Documentation
+* Add usage instructions to README.md ([`8a2e2c2`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/8a2e2c26e5bc6b39d10defe0f7b15f93e2fda763))
+
 ## v0.3.0 (2024-01-18)
 ### Feature
 * Refactor verbose logging and separate camelcase handler ([`0b504da`](https://github.com/educationwarehouse/edwh-nostr-messagebus/commit/0b504da0e20f97a510207428bbe8532062ae89c2))
