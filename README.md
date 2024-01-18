@@ -36,3 +36,9 @@ Basically, this is alot of what this entire project is all about.
 ## License
 
 `-` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+
+
+## Packaging
+Make sure your commit messages are semantic. 
+
+- `semantic-release publish; hatch build -c ; hatch publish` 
