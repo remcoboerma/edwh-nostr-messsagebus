@@ -6,15 +6,18 @@
 -----
 
 **Table of Contents**
-
 - [Installation](#installation)
+- [Usage](#usage)
 - [License](#license)
 
 ## Installation
 
 ```console
-pip install -
+pip install edwh-nostr-messagebus 
 ```
+
+There is an example folder that you can [view on github](https://github.com/educationwarehouse/edwh-nostr-messagebus/tree/main/examples) 
+with a helpful `tasks.py` demo to work with this library. 
 
 ## Usage
 - Run `python3 ./run_relay --port 8888` from the `monstr_terminal` package to have local relay
