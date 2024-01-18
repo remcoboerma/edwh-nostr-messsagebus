@@ -1,4 +1,5 @@
 import copy
+import datetime
 import json
 import logging
 import pprint
@@ -62,7 +63,12 @@ def print_event_handler(client: OLClient, js: str, event: Event) -> None:
     Prints the objects using pprinted reprs, for troubleshooting nostr events.
     """
     e = copy.copy(event.__dict__)
-    e["_tags"] = copy.copy(event._tags.__dict__)
+    e['_tags'] = dict(event.tags.tags)
+    e = {k.strip('_'):v for k,v in e.items()}
+    if 'meta' in e['tags']:
+        e['tags']['meta'] = json.loads(e['tags']['meta'])
+    e['created_at'] = str(datetime.datetime.fromtimestamp(e['created_at']))
+    e['sig'] = e['sig'][:10] + '...' + e['sig'][-10:]
     pprint.pprint(e, indent=2, width=120, sort_dicts=True)
 
 
