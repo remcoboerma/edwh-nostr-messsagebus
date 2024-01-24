@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import datetime
 import json
@@ -6,11 +7,16 @@ import pprint
 import uuid
 
 import edwh
-from invoke import task
+import ndjson
+from edwh_nostr_messagebus.client import (
+    OLClient,
+    StopProcessingHandlers,
+    listen_forever,
+    send_and_disconnect,
+)
+from invoke import Context, task
 from monstr.encrypt import Keys
 from monstr.event.event import Event
-
-from edwh_nostr_messagebus.client import send_and_disconnect, listen_forever, OLClient
 
 
 class ConfigurationError(Exception):
@@ -18,7 +24,7 @@ class ConfigurationError(Exception):
 
 
 @task()
-def setup(ctx):
+def setup(ctx: Context):  # noqa: ARG001
     """
     This function is a task that sets up the environment for the application.
     It checks the values of certain environment variables and ensures they are properly set.
@@ -47,7 +53,7 @@ def setup(ctx):
         )
 
 
-def pprint_handler(client: OLClient, js: str, event: Event) -> None:
+def pprint_handler(client: OLClient, js: str, event: Event) -> None:  # noqa: ARG001
     """
     Pretty prints the JSON contents of the event, for troubleshooting business events.
 
@@ -55,7 +61,7 @@ def pprint_handler(client: OLClient, js: str, event: Event) -> None:
     :param event: The event related to the pprint_handler method.
     :return: None
     """
-    pprint.pprint(json.loads(js), indent=2, width=120, sort_dicts=True)
+    pprint.pprint(json.loads(js), indent=2, width=120, sort_dicts=True)  # noqa: T203
 
 
 def print_event_handler(client: OLClient, js: str, event: Event) -> None:
@@ -63,13 +69,18 @@ def print_event_handler(client: OLClient, js: str, event: Event) -> None:
     Prints the objects using pprinted reprs, for troubleshooting nostr events.
     """
     e = copy.copy(event.__dict__)
-    e['_tags'] = dict(event.tags.tags)
-    e = {k.strip('_'):v for k,v in e.items()}
-    if 'meta' in e['tags']:
-        e['tags']['meta'] = json.loads(e['tags']['meta'])
-    e['created_at'] = str(datetime.datetime.fromtimestamp(e['created_at']))
-    e['sig'] = e['sig'][:10] + '...' + e['sig'][-10:]
-    pprint.pprint(e, indent=2, width=120, sort_dicts=True)
+    try:
+        e["_tags"] = dict(event.tags.tags)
+    except:
+        e["_tags"] = event.tags.tags
+    e = {k.strip("_"): v for k, v in e.items()}
+    if "meta" in e["tags"]:
+        e["tags"]["meta"] = json.loads(e["tags"]["meta"])
+    e["created_at"] = str(
+        datetime.datetime.fromtimestamp(e["created_at"], tz=datetime.UTC)
+    )
+    e["sig"] = e["sig"][:10] + "..." + e["sig"][-10:]
+    pprint.pprint(e, indent=2, width=120, sort_dicts=True)  # noqa: T203
 
 
 def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> None:
@@ -86,7 +97,7 @@ def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> N
         """
         try:
             return Keys(privkey).public_key_hex()
-        except Exception as e:
+        except Exception:
             return
 
     haystack = {
@@ -94,7 +105,7 @@ def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> N
     }
     needle = event._pub_key.lower()
     name_or_key = haystack.get(needle, needle)
-    print(f"---[from: {name_or_key}]-------------")
+    print(f"---[from: {name_or_key}]-------------")  # noqa: T201
 
 
 def parse_key(keyname_or_bech32: str | None) -> Keys:
@@ -112,9 +123,8 @@ def parse_key(keyname_or_bech32: str | None) -> Keys:
         try:
             return parse_key(edwh.read_dotenv()["PRIVKEY"])
         except KeyError as e:
-            raise ConfigurationError(
-                "PRIVKEY not found in .env, try running `inv setup`. "
-            ) from e
+            msg = "PRIVKEY not found in .env, try running `inv setup`. "
+            raise ConfigurationError(msg) from e
     try:
         return Keys(keyname_or_bech32)
     except Exception:
@@ -131,7 +141,7 @@ def parse_key(keyname_or_bech32: str | None) -> Keys:
     },
     incrementable="verbose",
 )
-def new(ctx, gidname, key=None, verbose=1):
+def new(ctx: Context, gidname, key=None, verbose=1):
     """
     Simulates a new object and sends the message over the relay,
     waiting for the client to finish all events and closes the connection.
@@ -151,23 +161,47 @@ def new(ctx, gidname, key=None, verbose=1):
     incrementable="verbose",
 )
 def jstagtest(ctx, key=None, verbose=1):
-    """
-    """
+    """ """
     logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
+
+    from rdflib import RDF, Graph, Literal, URIRef
+
+    # rdflib knows about quite a few popular namespaces, like W3C ontologies, schema.org etc.
+    from rdflib.namespace import FOAF, XSD
+
+    # Create a Graph
+    g = Graph()
+
+    # Create an RDF URI node to use as the subject for multiple triples
+    nsmv = URIRef("http://example.org/nsmv")
+
+    # Add triples using store's add() method.
+    g.add((nsmv, RDF.type, FOAF.Organization))
+    g.add((nsmv, FOAF.nick, Literal("NSMV", lang="NL")))
+    g.add((nsmv, FOAF.name, Literal("Niet stapelen maar vervangen")))
+    g.add((nsmv, FOAF.homepage, URIRef("https://www.nietstapelenmaarvervangen.nl")))
+
+    rdf_in_hext_js = g.serialize(format="hext")
 
     env = edwh.read_dotenv()
     relay = env["RELAY"]
     keys = parse_key(key or env["PRIVKEY"])
-    messages = [Event(
-        kind=Event.KIND_TEXT_NOTE,
-        content='Menselijke beschrijving',
-        pub_key=keys.public_key_hex(),
-        tags=[['olgid',f'gid://edwh/{uuid.uuid4()}'],
-              ['meta',json.dumps(dict(hier='komt_wat',informatie='in die',nested=dict(kan='zijn',maar='dat hoeft niet',exl='!')))]]
-    )]
+    messages = [
+        Event(
+            kind=Event.KIND_TEXT_NOTE,
+            content="Menselijke beschrijving",
+            pub_key=keys.public_key_hex(),
+            tags=[
+                ["olgid", f"gid://edwh/{uuid.uuid4()}"],
+                [
+                    "RDF",
+                    "application/hex+x-ndjson; charset=utf-8",
+                    rdf_in_hext_js,
+                ],
+            ],
+        )
+    ]
     send_and_disconnect(relay, keys, messages)
-
-
 
 
 @task(incrementable=["verbose"])
@@ -179,13 +213,49 @@ def connect(context, key=None, verbose=1):
     keys = parse_key(key)
     env = edwh.read_dotenv()
     listen_forever(
-        keys,
-        env["RELAY"],
-        int(env["LOOKBACK"]),
+        keys=keys,
+        relay=env["RELAY"],
+        lookback=int(env["LOOKBACK"]),
         domain_handlers=[
             print_friendly_keyname_handler,
             print_event_handler,
         ],
+    )
+
+
+@task(incrementable=["verbose"])
+def d1985(context, key=None, verbose=1):
+    """
+    Connect to the relay, listening for messages printing friendly names and message values.
+    """
+
+    def ignore_ugc_images(client: OLClient, js: str, event: Event) -> None:
+        e = []
+        for tag_tuple in event.tags:
+            if tag_tuple == ["L", "ugc"]:
+                raise StopProcessingHandlers
+            if tag_tuple[0] == "e":
+                e += [tag_tuple[1]]
+
+    logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
+    keys = parse_key(key)
+    env = edwh.read_dotenv()
+    listen_forever(
+        keys=keys,
+        relay=[
+            "wss://relay.nostr.band",
+            "wss://relay.sendstr.com",
+            "wss://relay.damus.io",
+            "wss://nostr.mom",
+            "wss://nos.lol",
+        ],
+        lookback=24 * 3600 * 31,
+        domain_handlers=[
+            ignore_ugc_images,
+            print_friendly_keyname_handler,
+            print_event_handler,
+        ],
+        anon_kinds=[1985],
     )
 
 
@@ -209,9 +279,9 @@ def camelcaser(context, key=None, verbose=1):
             client.broadcast(js, tags=[["better", True]])
 
     listen_forever(
-        keys,
-        env["RELAY"],
-        int(env["LOOKBACK"]),
+        keys=keys,
+        relay=env["RELAY"],
+        lookback=int(env["LOOKBACK"]),
         domain_handlers=[
             camelcase_name_handler,
         ],

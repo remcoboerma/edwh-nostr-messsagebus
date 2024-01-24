@@ -1,14 +1,28 @@
 import asyncio
 import datetime
 import json
+import logging
 import signal
 import typing
-from typing import Iterable, Any, Callable
-import logging
+from collections.abc import Callable, Iterable
+from typing import Any
 
-from monstr.client.client import ClientPool, Client
+from monstr.client.client import Client, ClientPool
 from monstr.encrypt import Keys
 from monstr.event.event import Event
+
+logger = logging.getLogger()
+
+# JSON source string
+js_str: typing.TypeAlias = str
+
+
+class DEFAULT:
+    pass
+
+
+class StopProcessingHandlers(StopIteration):
+    pass
 
 
 class OLClient:
@@ -54,19 +68,23 @@ class OLClient:
     client: Client | ClientPool
     keys: Keys
     # list to store the clients in for ctrl c handlers
-    _all_clients = []
-    domain_handler: list[Callable[[str, Event], None]]
+    _all_clients: typing.ClassVar = []
+    domain_handler: Iterable[Callable[["OLClient", js_str, Event], None]]
 
     def __init__(
         self,
+        *,
         relay: str,
         keys: Keys,
-        domain_handlers: Iterable[Callable[[str, Event], None]] = (),
+        domain_handlers: Iterable[Callable[["OLClient", js_str, Event], None]] = (),
         lookback: datetime.timedelta | None = None,
+        private_kinds: Iterable[int] | DEFAULT = DEFAULT,
+        anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
     ) -> None:
         """
         Initializes a new instance of the class, creates a new ClientPool as self.client.
 
+        :type kinds: the kinds of messages to subscribe to, DEFAULT means 1,4, 1984 and 1985
         :param relay: The relay to be used.
         :param keys: The keys to be used.
         :param domain_handlers: The domain handlers to be used. Default is an empty iterable.
@@ -76,8 +94,16 @@ class OLClient:
         self.relay = relay
         self.keys = keys
         self.lookback = lookback or datetime.timedelta(0)
+        self.private_kinds = (
+            [Event.KIND_ENCRYPT, Event.KIND_TEXT_NOTE]
+            if private_kinds is DEFAULT
+            else private_kinds
+        )
+        self.anon_kinds = (
+            [Event.KIND_TEXT_NOTE, 1984, 1985] if anon_kinds is DEFAULT else anon_kinds
+        )
         self.client = ClientPool(
-            clients=[self.relay],
+            clients=[relay] if isinstance(relay, str) else relay,
             on_auth=self.on_auth,
             on_connect=self.on_connect if domain_handlers else None,
             read=True,
@@ -96,19 +122,27 @@ class OLClient:
             handlers=[self],
             filters=[
                 {
-                    "kinds": [Event.KIND_ENCRYPT, Event.KIND_TEXT_NOTE],
+                    "kinds": self.private_kinds,
                     "#p": [self.keys.public_key_hex()],
-                    "since": int((datetime.datetime.now() - self.lookback).timestamp()),
+                    "since": int(
+                        (
+                            datetime.datetime.now(datetime.UTC) - self.lookback
+                        ).timestamp()
+                    ),
                 },
                 {
-                    "kinds": [Event.KIND_TEXT_NOTE],
-                    "since": int((datetime.datetime.now() - self.lookback).timestamp()),
+                    "kinds": self.anon_kinds,
+                    "since": int(
+                        (
+                            datetime.datetime.now(datetime.UTC) - self.lookback
+                        ).timestamp()
+                    ),
                 },
             ],
         )
         logging.debug("OLClient subscribed")
 
-    def do_event(self, client: Client, name: str, event: Event) -> None:
+    def do_event(self, client: Client, name: str, event: Event) -> None:  # noqa: ARG002
         """
         Calls all domain handlers with the response text and event. Called from monstr code when registered as handlers.
 
@@ -120,11 +154,13 @@ class OLClient:
         for handler in self.domain_handlers:
             try:
                 handler(self, self.get_response_text(event), event)
+            except StopProcessingHandlers:
+                break
             except Exception as e:
-                print(e)
+                logger.error(e)
                 raise
 
-    def get_response_text(self, event: Event) -> str:
+    def get_response_text(self, event: Event) -> js_str:
         """
         Returns the response text possibly decrypting the content if it's a nip-4 encrypted message.
 
@@ -134,11 +170,11 @@ class OLClient:
         :rtype: str
         """
         return (
-            event.content
-            if event.kind == Event.KIND_TEXT_NOTE
-            else Event.decrypted_content(
+            event.decrypted_content(
                 priv_key=self.keys.private_key_hex(), pub_key=event.pub_key
             )
+            if event.kind == Event.KIND_ENCRYPT
+            else event.content
         )
 
     def on_auth(self, client: Client, challenge: str):
@@ -157,8 +193,9 @@ class OLClient:
 
     def broadcast(
         self,
-            payload: Any | Event,
+        payload: Any | Event,
         tags: Iterable[Iterable[str | Any]] | str = (),
+        *,
         public: bool = True,
     ):
         """
@@ -195,10 +232,10 @@ class OLClient:
             )
         n_event.sign(self.keys.private_key_hex())
         logging.debug(
-            f'Broadcasting {repr(payload)} with {tags} {"public" if public else "privately"}'
+            f'Broadcasting {payload!r} with {tags} {"public" if public else "privately"}'
         )
         logging.info(
-            f'Broadcasting {repr(payload)} {"publicly" if public else "privately"}'
+            f'Broadcasting {payload!r} {"publicly" if public else "privately"}'
         )
         self.client.publish(n_event)
 
@@ -249,7 +286,7 @@ async def shutdown_on_signal(sig, loop, client: OLClient):
 
 
 def send_and_disconnect(
-        relay: str | list[str], keys: Keys, messages: list[dict[str, str] | Event]
+    relay: str | list[str], keys: Keys, messages: list[dict[str, str] | Event]
 ):
     """
     This method establishes a connection with the specified relay(s) using the provided keys, sends the given messages,
@@ -270,7 +307,6 @@ def send_and_disconnect(
     :param messages: The list of messages to send. Each message should be a dictionary of key-value pairs.
     :return: None
     """
-    logging.basicConfig(level=logging.DEBUG)
     client = OLClient(
         relay=relay,
         keys=keys,
@@ -325,26 +361,32 @@ def send_and_disconnect(
 
 
 def listen_forever(
+    *,
     keys: Keys,
     relay: list[str] | str,
     lookback: int = 0,
     domain_handlers: Iterable[Callable[[OLClient, str, Event], None]] = (),
+    anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
+    private_kinds: Iterable[int] | DEFAULT = DEFAULT,
 ):
     """
     Start listening for events indefinitely.
 
+    :param anon_kinds: the kind of notes to subscribe to without specific key
+    :param private_kinds: the kind of notes to subscribe to when addressed over public key
     :param keys: The keys used for authentication.
     :param relay: The relay(s) to connect to. It can be a single relay as a string or a list of relays.
     :param lookback: The number of seconds to look back for events.
     :param domain_handlers: A collection of domain handlers to handle specific event domains.
     :return: None
     """
-    logging.basicConfig(level=logging.INFO)
     client = OLClient(
         relay=relay,
         lookback=datetime.timedelta(seconds=lookback),
         keys=keys,
         domain_handlers=domain_handlers,
+        anon_kinds=anon_kinds,
+        private_kinds=private_kinds,
     )
 
     async def run_services():
