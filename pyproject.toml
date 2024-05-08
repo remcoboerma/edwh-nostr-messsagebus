@@ -57,8 +57,12 @@ dependencies = [
   "coverage[toml]>=6.5",
   "pytest",
   "monstr",
+  "invoke",
+  "tqdm",
+  "edwh",
   "edwh",
   "click",
+  "plumbum"
 ]
 [tool.hatch.envs.default.scripts]
 test = "pytest {args:tests}"
@@ -71,6 +75,11 @@ cov = [
   "test-cov",
   "cov-report",
 ]
+ew = ['cd examples; edwh {args}']
+edwh = ['cd examples; edwh {args}']
+inv = ['cd examples; invoke {args}']
+invoke = ['cd examples; invoke {args}']
+
 
 [[tool.hatch.envs.all.matrix]]
 python = ["3.10", "3.11"]
@@ -81,6 +90,7 @@ dependencies = [
   "black>=23.1.0",
   "mypy>=1.0.0",
   "ruff>=0.0.243",
+  "pytest",
 ]
 [tool.hatch.envs.lint.scripts]
 typing = "mypy --install-types --non-interactive {args:src/_ tests}"
