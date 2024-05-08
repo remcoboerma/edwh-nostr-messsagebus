@@ -301,3 +301,7 @@ def key(context, name=None):
             comment=f"Fresh key for {name}:",
         )
         print(bech32)
+    else:
+        print('Just a random key generated for you:')
+        print(keys.private_key_bech32())
+        print(keys.public_key_bech32())
