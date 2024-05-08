@@ -203,6 +203,11 @@ def jstagtest(ctx, key=None, verbose=1):
     ]
     send_and_disconnect(relay, keys, messages)
 
+@task()
+def pubkey(context, key=None):
+    env = edwh.read_dotenv()
+    keys = parse_key(key or env["PRIVKEY"])
+    print(key,":",keys.public_key_bech32())  # noqa: T201
 
 @task(incrementable=["verbose"])
 def connect(context, key=None, verbose=1):
