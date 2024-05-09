@@ -1,17 +1,26 @@
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
+import queue
 import signal
 import typing
 from collections.abc import Callable, Iterable
+from queue import Queue
 from typing import Any
 
 from monstr.client.client import Client, ClientPool
 from monstr.encrypt import Keys
 from monstr.event.event import Event
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler = logging.FileHandler("troubleshooting.log")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 # JSON source string
 js_str: typing.TypeAlias = str
@@ -260,24 +269,27 @@ class OLClient:
         self.broadcast(payload, tags)
 
 
-cleanup_done_event = asyncio.Event()
+cleanup_done_event = queue.Queue()
 
 
 async def cleanup(signal_, loop, client: OLClient):
     print(f"Received exit signal {signal_.name}...")
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
 
     client.end()
 
     await asyncio.sleep(0.5)
 
+    # TODO  alleen task parents killen en niet de children.
+
     for task in tasks:
-        task.cancel()
+        if not task.cancelled():
+            task.cancel()
 
     print("Cancelling tasks, waiting for them to finish...")
     await asyncio.gather(*tasks, return_exceptions=True)
     print("Tasks finished cancelling.")
-    cleanup_done_event.set()
+    cleanup_done_event.put("cleanup done")
 
 
 async def shutdown_on_signal(sig, loop, client: OLClient):
@@ -351,11 +363,15 @@ def send_and_disconnect(
         client_task = await asyncio.create_task(client.run())
         for message in messages:
             client.broadcast(message)
-        stop_task = asyncio.create_task(wait_for_empty_queue())
+        await wait_for_empty_queue()
         await client_task
-        await stop_task
-        cleanup_done_event.set()
-        await cleanup_done_event.wait()
+        await cleanup(signal.SIGINT, loop, client)
+        timeout = 5
+        while timeout > 0:
+            with contextlib.suppress(queue.Empty):
+                cleanup_done_event.get(block=False)
+            timeout -= 0.1
+            await asyncio.sleep(0.1)
 
     asyncio.run(connect_execute_and_die())
 
@@ -368,9 +384,11 @@ def listen_forever(
     domain_handlers: Iterable[Callable[[OLClient, str, Event], None]] = (),
     anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
     private_kinds: Iterable[int] | DEFAULT = DEFAULT,
+        thread_command_queue: Queue = None,
 ):
     """
-    Start listening for events indefinitely.
+    Start listening for events indefinitely, except when thread_command_queue is a queue and a signal.signal
+    object is sent to "emulate" a signal.SIGINT or similar.
 
     :param anon_kinds: the kind of notes to subscribe to without specific key
     :param private_kinds: the kind of notes to subscribe to when addressed over public key
@@ -378,6 +396,7 @@ def listen_forever(
     :param relay: The relay(s) to connect to. It can be a single relay as a string or a list of relays.
     :param lookback: The number of seconds to look back for events.
     :param domain_handlers: A collection of domain handlers to handle specific event domains.
+    :param thread_command_queue: set a queue.Queue when using a separate thread, avoiding signal handler registration.
     :return: None
     """
     client = OLClient(
@@ -389,18 +408,57 @@ def listen_forever(
         private_kinds=private_kinds,
     )
 
+    async def process_thread_command_queue():
+        """
+        Process commands from the thread command queue.
+
+        This function continuously retrieves commands from the thread
+        command queue and processes them. The commands are expected to
+        be instances of the `signal.signal` class. When a command is
+        received, it is passed to the `shutdown_on_signal` function
+        along with the event loop and client.
+
+        This function also includes a 0.3-second delay between command
+        processing to avoid excessive CPU usage.
+
+        :return: None
+        """
+        loop = asyncio.get_event_loop()
+        while True:
+            await asyncio.sleep(0.3)
+            with contextlib.suppress(queue.Empty):
+                command: signal.Signals = thread_command_queue.get(block=False)
+                if isinstance(command, signal.Signals):
+                    await shutdown_on_signal(command, loop, client)
+                    return
+
     async def run_services():
         loop = asyncio.get_event_loop()
-        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
-        for s in signals:
-            # noinspection PyUnresolvedReferences
-            loop.add_signal_handler(
-                s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
-            )
+        if not thread_command_queue:
+            # only perform this in the main thread, as signals cannot be handled in new threads.
+            signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+            for s in signals:
+                # noinspection PyUnresolvedReferences
+                loop.add_signal_handler(
+                    s,
+                    lambda s=s: asyncio.create_task(
+                        shutdown_on_signal(s, loop, client)
+                    ),
+                )
 
-        await asyncio.create_task(await client.run())
+        if thread_command_queue:
+            # spawn a thread to monitor our thread-queue
+            await asyncio.create_task(process_thread_command_queue())
+        # actually start a client.
+        await client.run()
+        await cleanup(signal.SIGINT, loop, client)
+        timeout = 5
+        while timeout > 0:
+            with contextlib.suppress(queue.Empty):
+                cleanup_done_event.get(block=False)
+            timeout -= 0.1
+            await asyncio.sleep(0.1)
 
-        cleanup_done_event.set()
-        await cleanup_done_event.wait()
-
+    # fireup a loop
+    # run the function that will start the tasks from within the loop
     asyncio.run(run_services())

@@ -27,6 +27,9 @@ dependencies = [
   'rdflib'
 ]
 
+[tool.pytest.ini_options]
+addopts = "--log-cli-level=DEBUG"
+
 [tool.semantic_release]
 branch = "main"
 version_variable = "src/edwh_nostr_messagebus/__about__.py:__version__"
