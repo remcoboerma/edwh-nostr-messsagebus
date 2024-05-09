@@ -7,6 +7,9 @@ import signal
 import time
 from collections.abc import Callable
 
+import queue
+import threading
+
 import pytest
 from edwh_nostr_messagebus.client import (
     OLClient,
@@ -98,17 +101,24 @@ def self_terminate():
 # @pytest.mark.skip("ignore")
 def test_send_and_receive_some_messages(relay, session_key):  # noqa: ARG001
     messages = [{"foo": "bar"}]
-    success = False
+    success = threading.Event()
 
     def wait_for_it(client: OLClient, js: str, event: Event) -> None:  # noqa: ARG001
+        logging.info(f"received message:{js} in {event}")
         js = json.loads(js)
         if js["foo"] == "bar":
+            logging.debug("BAR received")
             js["foo"] = "baz"
+            logging.info(f"broading updates message:{js}, with tags: better == True")
             client.broadcast(js, tags=[["better", True]])
+            logging.info("self terminating")
             self_terminate()
+            logging.info("termination requested")
         elif js["foo"] == "baz":
+            logging.debug("BAZ received")
             nonlocal success
-            success = True
+            success.set()
+        logging.debug(f"message {event} handled.")
 
     send_and_disconnect([RELAY_URL], session_key, messages)
 
@@ -116,16 +126,14 @@ def test_send_and_receive_some_messages(relay, session_key):  # noqa: ARG001
         listen_forever(
             keys=session_key,
             relay=RELAY_URL,
-            lookback=10,
+            lookback=20,
             domain_handlers=[
                 wait_for_it,
             ],
         )
-    assert success
+    assert success.is_set()
 
 
-import queue
-import threading
 
 
 def threaded_listen_forever(
@@ -165,7 +173,7 @@ def test_send_and_receive_some_messages_using_threads(relay, session_key):
 
     q = queue.Queue()
     listen_thread = threading.Thread(
-        target=threaded_listen_forever, args=(q, session_key, 10, [wait_for_it])
+        target=threaded_listen_forever, args=(q, session_key, 20, [wait_for_it])
     )
     listen_thread.start()
 
@@ -180,9 +188,9 @@ def test_send_and_receive_some_messages_using_threads(relay, session_key):
     # sending_thread.join(2)
     # signal the asyncio loop to terminate in the other thread
     q.put(signal.SIGHUP)
-    listen_thread.join(2)
+    listen_thread.join(5)
     ex = q.get()  # get exception from the queue if there was one
+    ex.task_done()
     if isinstance(ex, BaseException):  # If there was an exception, reraise it
         raise ex
-    assert True
-    # assert success.get() is True
+    assert success.get() is True

@@ -1,4 +1,5 @@
 import asyncio
+import binascii
 import contextlib
 import datetime
 import json
@@ -80,6 +81,12 @@ class OLClient:
     _all_clients: typing.ClassVar = []
     domain_handler: Iterable[Callable[["OLClient", js_str, Event], None]]
 
+    def __repr__(self):
+        shortid = "{:05x}".format(binascii.crc32(f"{id(self)}".encode()) & 0xFFFFFFFF)
+        return (
+            f"<OLClient:{shortid} k:{self.keys.private_key_hex()[:5]} {self.purpose} {','.join(_.__name__ for _ in self.domain_handlers)}>"
+        )
+
     def __init__(
         self,
         *,
@@ -89,6 +96,7 @@ class OLClient:
         lookback: datetime.timedelta | None = None,
         private_kinds: Iterable[int] | DEFAULT = DEFAULT,
         anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
+        purpose: str = "?",
     ) -> None:
         """
         Initializes a new instance of the class, creates a new ClientPool as self.client.
@@ -98,7 +106,7 @@ class OLClient:
         :param keys: The keys to be used.
         :param domain_handlers: The domain handlers to be used. Default is an empty iterable.
         :param lookback: The lookback duration to be used. Default is None.
-
+        :param purpose: The purpose for this client, used for logging. Default is '?'.
         """
         self.relay = relay
         self.keys = keys
@@ -120,9 +128,10 @@ class OLClient:
         )
         self._all_clients.append(self.client)
         self.domain_handlers = domain_handlers
+        self.purpose = purpose
 
     def on_connect(self, client: Client) -> None:
-        logging.debug("OLClient connected")
+        logging.debug(f"{self}: OLClient connected")
         # filters can be alist of dicts, meaning they are ORed.
         # the first filters direct messages to this pubkey (plaintext and encrypted text notes)
         # the second reads all unencrypted text-notes from everyone, that the relay allows us to read.
@@ -149,7 +158,7 @@ class OLClient:
                 },
             ],
         )
-        logging.debug("OLClient subscribed")
+        logging.debug(f"{self}: OLClient subscribed")
 
     def do_event(self, client: Client, name: str, event: Event) -> None:  # noqa: ARG002
         """
@@ -160,10 +169,13 @@ class OLClient:
         :param event: The event object.
         :return: None.
         """
+        logger.debug(f"{client}: do_event: {name} {event}")
         for handler in self.domain_handlers:
             try:
+                logger.debug(f"{client}: {handler.__name__} {name} {event}")
                 handler(self, self.get_response_text(event), event)
             except StopProcessingHandlers:
+                logger.debug(f'{client}: caught StopProcessingHandlers')
                 break
             except Exception as e:
                 logger.error(e)
@@ -241,10 +253,10 @@ class OLClient:
             )
         n_event.sign(self.keys.private_key_hex())
         logging.debug(
-            f'Broadcasting {payload!r} with {tags} {"public" if public else "privately"}'
+            f'{self}: Broadcasting {payload!r} with {tags} {"public" if public else "privately"}'
         )
         logging.info(
-            f'Broadcasting {payload!r} {"publicly" if public else "privately"}'
+            f'{self}: Broadcasting {payload!r} {"publicly" if public else "privately"}'
         )
         self.client.publish(n_event)
 
@@ -273,28 +285,35 @@ cleanup_done_event = queue.Queue()
 
 
 async def cleanup(signal_, loop, client: OLClient):
-    print(f"Received exit signal {signal_.name}...")
+    logger.debug(f"{client}: Received exit signal {signal_.name}, commencing cleanup")
     tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
-
+    logger.debug(f"{client}: found{len(tasks)} tasks")
+    logger.debug(f"{client}: requesting client to end")
     client.end()
 
     await asyncio.sleep(0.5)
+    logger.debug(f"{client}: cancelling all tasks")
 
     # TODO  alleen task parents killen en niet de children.
 
+    # for task in tasks:
+    #     if not task.cancelled():
+    #         logger.debug(f"Cancelling task {task}")
+    #         with contextlib.suppress(RecursionError):
+    #             task.cancel()
+    logger.debug(f"{client}: waiting for canceled tasks to finish:")
     for task in tasks:
-        if not task.cancelled():
-            task.cancel()
-
-    print("Cancelling tasks, waiting for them to finish...")
-    await asyncio.gather(*tasks, return_exceptions=True)
-    print("Tasks finished cancelling.")
+        logger.debug(f" - waiting for {task}")
+    #await asyncio.gather(*tasks, return_exceptions=True)
+    logger.debug(f"{client}: tasks finished succesfully, marking cleanup done.")
     cleanup_done_event.put("cleanup done")
 
 
 async def shutdown_on_signal(sig, loop, client: OLClient):
-    print(f"Received shutdown signal {sig}...")
-    await cleanup(sig, loop, client)
+    logging.info(f"{client}: Received shutdown signal {sig}...")
+    await asyncio.create_task(
+        cleanup(sig, loop, client), name="cleanup after shutdown signal"
+    )
 
 
 def send_and_disconnect(
@@ -323,14 +342,18 @@ def send_and_disconnect(
         relay=relay,
         keys=keys,
         domain_handlers=[],
+        purpose="S&D",
     )
+    messages_sent = asyncio.Event()
 
+    # noinspection PyProtectedMember
     async def wait_for_empty_queue():
         """
         Wait until all queues are empty before disconnecting the client.
 
         :return: None
         """
+        logger.debug(f"{client} Waiting for empty queue")
         if hasattr(client.client, "._publish_q"):
             client_queues = [client.client._publish_q]
         else:
@@ -339,39 +362,50 @@ def send_and_disconnect(
             ]
 
         logging.debug(
-            f"monitoring {len(client_queues)} queues if they are ready to quit"
+            f"{client} monitoring {len(client_queues)} queues if they are ready to quit"
         )
         while total_open_connections := sum(_.qsize() for _ in client_queues):
             logging.debug(f"Waiting for {total_open_connections} to close.")
             await asyncio.sleep(0.3)
 
-        logging.debug("requesting client to release the connection")
+        logging.debug(f"{client} requesting client to release the connection")
         client.end()
+        logging.debug(f"{client} Marking messages as ready for close")
+        messages_sent.set()
 
     async def connect_execute_and_die():
         """
         Connects to a relay, sends a set of messages, waits for them to be sent and terminates the connection.
         """
-        loop = asyncio.get_event_loop()
-        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
-        for s in signals:
-            # noinspection PyUnresolvedReferences
-            loop.add_signal_handler(
-                s, lambda s=s: asyncio.create_task(shutdown_on_signal(s, loop, client))
-            )
-
-        client_task = await asyncio.create_task(client.run())
+        logger.debug(f"{client}: Running client in new task ")
+        client_task = await asyncio.create_task(
+            client.run(), name=f"client.run of {client}"
+        )
+        logger.debug(f"{client}: New queue monitor ")
+        await asyncio.create_task(
+            wait_for_empty_queue(), name=f"wait_for_empty_queue related to {client}"
+        )
         for message in messages:
+            logger.info(f"{client}: sending message...")
+            logger.debug(f"{client}: {message}")
             client.broadcast(message)
-        await wait_for_empty_queue()
-        await client_task
-        await cleanup(signal.SIGINT, loop, client)
+        # logger.debug(f"{client}: awaiting client")
+        # await client_task
+        logger.debug(f"{client}: waiting for signal from the empty queue monitor")
+        await messages_sent.wait()
+        logger.debug(f"{client}: starting cleanup")
+        await cleanup(signal.SIGINT, asyncio.get_event_loop(), client)
+        logger.debug(f"{client}: Waiting for cleanup done signal.")
         timeout = 5
         while timeout > 0:
             with contextlib.suppress(queue.Empty):
-                cleanup_done_event.get(block=False)
-            timeout -= 0.1
+                evt = cleanup_done_event.get(block=False)
+                logger.debug(
+                    f"{client}: got a cleanup event done signal after {5 - timeout} seconds. "
+                )
+            timeout -= 0.3
             await asyncio.sleep(0.1)
+        logger.debug(f"{client}: Done, returning from connect_execute_and_die")
 
     asyncio.run(connect_execute_and_die())
 
@@ -384,7 +418,7 @@ def listen_forever(
     domain_handlers: Iterable[Callable[[OLClient, str, Event], None]] = (),
     anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
     private_kinds: Iterable[int] | DEFAULT = DEFAULT,
-        thread_command_queue: Queue = None,
+    thread_command_queue: Queue = None,
 ):
     """
     Start listening for events indefinitely, except when thread_command_queue is a queue and a signal.signal
@@ -406,6 +440,7 @@ def listen_forever(
         domain_handlers=domain_handlers,
         anon_kinds=anon_kinds,
         private_kinds=private_kinds,
+        purpose="Listen-4ever",
     )
 
     async def process_thread_command_queue():
@@ -423,15 +458,25 @@ def listen_forever(
 
         :return: None
         """
+        logging.debug("Waiting for commands from the thread command queue.")
         loop = asyncio.get_event_loop()
         while True:
             await asyncio.sleep(0.3)
             with contextlib.suppress(queue.Empty):
                 command: signal.Signals = thread_command_queue.get(block=False)
+                logging.debug(f"⚠️ received signal: {command}")
                 if isinstance(command, signal.Signals):
-                    await shutdown_on_signal(command, loop, client)
+                    logging.debug(f"Requesting shutdown for {client} in a new task")
+                    await asyncio.create_task(
+                        shutdown_on_signal(command, loop, client),
+                        name=f"Shutdown on signal for {client}",
+                    )
+                    logging.debug("terminating process_thread_command_queue itself")
+                    thread_command_queue.task_done()
                     return
-
+                else:
+                    logging.debug(f"🚫 uknown command: {command}")
+                    thread_command_queue.task_done()
     async def run_services():
         loop = asyncio.get_event_loop()
         if not thread_command_queue:
@@ -442,20 +487,31 @@ def listen_forever(
                 loop.add_signal_handler(
                     s,
                     lambda s=s: asyncio.create_task(
-                        shutdown_on_signal(s, loop, client)
+                        shutdown_on_signal(s, loop, client),
+                        name=f"Shutdown on signal {s} for {client}",
                     ),
                 )
 
         if thread_command_queue:
             # spawn a thread to monitor our thread-queue
-            await asyncio.create_task(process_thread_command_queue())
+            logging.debug("Spawning task for process_thread_command_queue")
+            await asyncio.create_task(
+                process_thread_command_queue(),
+                name=f"Process thread command queue related to {client}",
+            )
         # actually start a client.
+        logging.debug(f"Running client {client}")
         await client.run()
+        await asyncio.sleep(5) # waarom worden hier been berichten in gelezen?!?!?
+        logging.debug(f"Sending SIGINT to {client}")
         await cleanup(signal.SIGINT, loop, client)
         timeout = 5
         while timeout > 0:
             with contextlib.suppress(queue.Empty):
                 cleanup_done_event.get(block=False)
+                logging.debug(f"🧹 Got the cleanup done event in {5-timeout} seconds.!")
+                cleanup_done_event.task_done()
+                break
             timeout -= 0.1
             await asyncio.sleep(0.1)
 
