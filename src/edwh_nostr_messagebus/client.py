@@ -208,7 +208,7 @@ class OLClient:
         """Pass-thru to the client's run method."""
         try:
             logging.info("--->")
-            self.client.run()
+            await self.client.run()
             logging.info("<---")
         except Exception as e:
             logging.error(e)
