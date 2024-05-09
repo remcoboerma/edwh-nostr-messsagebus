@@ -142,6 +142,7 @@ def threaded_listen_forever(
     lookback: int,
     domain_handlers: list[Callable],
     relay: str | list[str] = RELAY_URL,
+    max_loop_duration: int | None = None,
 ) -> None:
     try:
         listen_forever(
@@ -150,30 +151,34 @@ def threaded_listen_forever(
             lookback=lookback,
             domain_handlers=domain_handlers,
             thread_command_queue=q,
+            max_loop_duration=max_loop_duration
         )
     except Exception as e:
         q.put(e)
     else:
         # always put up something in the queue to .get() will not wait forever
-        q.put(None)  # signal that processing was successful
+        q.put('Clean')  # signal that processing was successful
 
 
 def test_send_and_receive_some_messages_using_threads(relay, session_key):
     success = queue.Queue()
 
     def wait_for_it(client: OLClient, js: str, event: Event) -> None:  # noqa: ARG001
+        logging.debug(f"{client:} - wait_for_it - {js}")
         js = json.loads(js)
         if js["foo"] == "bar":
             js["foo"] = "baz"
+            logging.debug("is bar, sending baz")
             client.broadcast(js, tags=[["better", True]])
-            client.terminate()
         elif js["foo"] == "baz":
+            logging.debug("recived baz, marking success and requesting client.end()")
             nonlocal success
             success.put(True)
+            client.end()
 
     q = queue.Queue()
     listen_thread = threading.Thread(
-        target=threaded_listen_forever, args=(q, session_key, 20, [wait_for_it])
+        target=threaded_listen_forever, args=(q, session_key, 20, [wait_for_it],), kwargs={"max_loop_duration": 5}
     )
     listen_thread.start()
 
@@ -190,7 +195,8 @@ def test_send_and_receive_some_messages_using_threads(relay, session_key):
     q.put(signal.SIGHUP)
     listen_thread.join(5)
     ex = q.get()  # get exception from the queue if there was one
-    ex.task_done()
+    q.task_done()
     if isinstance(ex, BaseException):  # If there was an exception, reraise it
         raise ex
+    assert ex == 'Clean'
     assert success.get() is True
