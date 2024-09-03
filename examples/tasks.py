@@ -75,7 +75,7 @@ def print_event_handler(
     e = copy.copy(event.__dict__)
     try:
         e["_tags"] = dict(event.tags.tags)
-    except:
+    except Exception:
         e["_tags"] = event.tags.tags
     e = {k.strip("_"): v for k, v in e.items()}
     if "meta" in e["tags"]:
@@ -88,8 +88,8 @@ def print_event_handler(
 
 
 def print_friendly_keyname_handler(
-    client: OLClient, js: str, event: Event
-) -> None:  # noqa: ARG001
+    client: OLClient, js: str, event: Event  # noqa: ARG001
+) -> None:
     """
     Print friendly keynames handler in a banner before the next handler fires, based on the .env file.
     """
@@ -173,7 +173,7 @@ def jstagtest(ctx: Context, key=None, verbose=1):  # noqa: ARG001
     from rdflib import RDF, Graph, Literal, URIRef
 
     # rdflib knows about quite a few popular namespaces, like W3C ontologies, schema.org etc.
-    from rdflib.namespace import FOAF, XSD
+    from rdflib.namespace import FOAF, XSD  # noqa: F401
 
     # Create a Graph
     g = Graph()
@@ -236,8 +236,8 @@ def d1985(context: Context, key=None, verbose=1):  # noqa: ARG001
     """
 
     def ignore_ugc_images(
-        client: OLClient, js: str, event: Event
-    ) -> None:  # noqa: ARG001
+        client: OLClient, js: str, event: Event  # noqa: ARG001
+    ) -> None:
         e = []
         for tag_tuple in event.tags:
             if tag_tuple == ["L", "ugc"]:
@@ -247,7 +247,7 @@ def d1985(context: Context, key=None, verbose=1):  # noqa: ARG001
 
     logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
     keys = parse_key(key)
-    env = edwh.read_dotenv()
+    # env = edwh.read_dotenv()
     listen_forever(
         keys=keys,
         relay=[
@@ -308,8 +308,8 @@ def key(context: Context, name=None):  # noqa: ARG001
             default=keys.private_key_bech32(),
             comment=f"Fresh key for {name}:",
         )
-        print(bech32)
+        print(bech32)  # noqa: T201
     else:
-        print("Just a random key generated for you:")
-        print(keys.private_key_bech32())
-        print(keys.public_key_bech32())
+        print("Just a random key generated for you:")  # noqa: T201
+        print(keys.private_key_bech32())  # noqa: T201
+        print(keys.public_key_bech32())  # noqa: T201
