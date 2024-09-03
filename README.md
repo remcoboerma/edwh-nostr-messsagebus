@@ -30,8 +30,8 @@ with a helpful `tasks.py` demo to work with this library.
 - Install py-invoke using `pip install invoke`
 - Run `python3 ./run_relay --port 8888` from the `monstr_terminal` package to host a local relay in a separate terminal
 - chdir to the examples folder (the one with the `tasks.py` file)
-- Run `invoke setup` before anything else, in this folder, or wherever you create your `tasks.py`
-- Run `invoke camelcaser -vv` to enable the example camelcaser bot 
+- Run `invoke setup` before anything else, in this folder, or wherever you create/user your `tasks.py`
+- Run `invoke camelcaser -vv` to start the example camelcaser bot 
 - Run `invoke connect -vvv` to watch debug output from several read-only message dumping handlers
 - Run `invoke new --gidname "abc:here is my test" --gidname "def:And another" --key edwh` to create 2 messages for new items
 
@@ -39,7 +39,7 @@ The first message from the `new` command will result in a trigger of the `camelc
 not camelcased names. The second message is "properly" formatted, and will not trigger it. In the debug view you can see
 there are extra tags on the newly created message for the same gid, and an updated name attribute. 
 
-Basically, this is alot of what this entire project is all about. 
+Basically, this is most of what this project is all about. 
 
 ## License
 
@@ -47,6 +47,5 @@ Basically, this is alot of what this entire project is all about.
 
 
 ## Packaging
-Make sure your commit messages are semantic. 
-
+Make sure your commit messages are semantic.
 - `semantic-release publish; hatch build -c ; hatch publish` 
