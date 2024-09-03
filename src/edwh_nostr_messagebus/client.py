@@ -83,9 +83,7 @@ class OLClient:
 
     def __repr__(self):
         shortid = "{:05x}".format(binascii.crc32(f"{id(self)}".encode()) & 0xFFFFFFFF)
-        return (
-            f"<OLClient:{shortid} k:{self.keys.private_key_hex()[:5]} {self.purpose} {','.join(_.__name__ for _ in self.domain_handlers)}>"
-        )
+        return f"<OLClient:{shortid} k:{self.keys.private_key_hex()[:5]} {self.purpose} {','.join(_.__name__ for _ in self.domain_handlers)}>"
 
     def __init__(
         self,
@@ -175,7 +173,7 @@ class OLClient:
                 logger.debug(f"{client}: {handler.__name__} {name} {event}")
                 handler(self, self.get_response_text(event), event)
             except StopProcessingHandlers:
-                logger.debug(f'{client}: caught StopProcessingHandlers')
+                logger.debug(f"{client}: caught StopProcessingHandlers")
                 break
             except Exception as e:
                 logger.error(e)
@@ -361,22 +359,23 @@ def send_and_disconnect(
         """
         logger.debug(f"{client} Waiting for empty queue")
         if hasattr(client.client, "._publish_q"):
-            logger.debug(f'{client}: ._publish_q peek')
+            logger.debug(f"{client}: ._publish_q peek")
             # when using a single relay, just use this.
             client_queues = [client.client._publish_q]
         else:
-            logger.debug(f'{client}: .clients._clients[].client._publish_q peek')
+            logger.debug(f"{client}: .clients._clients[].client._publish_q peek")
             # when using multiple relays, work through the pool
             client_queues = [
                 _["client"]._publish_q for _ in client.client._clients.values()
             ]
 
-
         logging.debug(
             f"{client} monitoring {len(client_queues)} queues if they are ready to quit: {client_queues}"
         )
         while total_open_connections := sum(_.qsize() for _ in client_queues):
-            logging.debug(f"Waiting for connections ({total_open_connections}) to close.")
+            logging.debug(
+                f"Waiting for connections ({total_open_connections}) to close."
+            )
             for q in client_queues:
                 logging.debug(f"> {q}")
             await asyncio.sleep(0.5)
@@ -388,16 +387,16 @@ def send_and_disconnect(
 
     async def connect_execute_and_die():
         """
-        Connects to a relay, sends a set of messages, waits for them to be sent and terminates the connection.
+        Connects to a relay, sends a set of messages, waits for them to be sent, and terminates the connection.
         """
         logger.debug(f"{client}: Running client in new task ")
         client_task = asyncio.create_task(
-            client_run_result:= client.run(), name=f"client.run of {client}"
+            client_run_result := client.run(), name=f"client.run of {client}"
         )
-        logger.debug(f'client_run_result: {client_run_result!r}')
-        logger.debug(f'client_task: {client_task!r}')
+        logger.debug(f"client_run_result: {client_run_result!r}")
+        logger.debug(f"client_task: {client_task!r}")
         await asyncio.sleep(0.5)
-        logger.debug(f'client_task: {client_task!r}')
+        logger.debug(f"client_task: {client_task!r}")
         logger.debug(f"{client}: New queue monitor ")
         stop_task = asyncio.create_task(
             wait_for_empty_queue(), name=f"wait_for_empty_queue related to {client}"
@@ -438,7 +437,7 @@ def listen_forever(
     anon_kinds: Iterable[int] | DEFAULT = DEFAULT,
     private_kinds: Iterable[int] | DEFAULT = DEFAULT,
     thread_command_queue: Queue = None,
-    max_loop_duration:int|None = None
+    max_loop_duration: int | None = None,
 ):
     """
     Start listening for events indefinitely, except when thread_command_queue is a queue and a signal.signal
@@ -498,6 +497,7 @@ def listen_forever(
                 else:
                     logging.debug(f"🚫 uknown command: {command}")
                     thread_command_queue.task_done()
+
     async def run_services():
         loop = asyncio.get_event_loop()
         if not thread_command_queue:
@@ -523,16 +523,18 @@ def listen_forever(
         # actually start a client.
         logging.debug(f"Running client {client}")
         await client.run()
-        await asyncio.sleep(0.5) # waarom worden hier been berichten in gelezen?!?!?
+        await asyncio.sleep(0.5)  # waarom worden hier been berichten in gelezen?!?!?
         # logging.debug(f"Sending SIGINT to {client}")
         # await cleanup(signal.SIGINT, loop, client)
         if max_loop_duration:
-            logging.info(f'max_loop_duration: {max_loop_duration}')
+            logging.info(f"max_loop_duration: {max_loop_duration}")
             timeout = max_loop_duration
             while timeout > 0:
                 with contextlib.suppress(queue.Empty):
                     cleanup_done_event.get(block=False)
-                    logging.debug(f"🧹 Got the cleanup done event in {5-timeout} seconds.!")
+                    logging.debug(
+                        f"🧹 Got the cleanup done event in {5-timeout} seconds.!"
+                    )
                     cleanup_done_event.task_done()
                     break
                 timeout -= 0.1
@@ -541,7 +543,7 @@ def listen_forever(
                 # only on timeout:
                 client.end()
         else:
-            logging.info('No max_loop_duration: perpetual mode')
+            logging.info("No max_loop_duration: perpetual mode")
 
     # fireup a loop
     # run the function that will start the tasks from within the loop
