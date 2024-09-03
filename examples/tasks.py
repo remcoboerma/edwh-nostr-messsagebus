@@ -55,18 +55,22 @@ def setup(ctx: Context):  # noqa: ARG001
 
 def pprint_handler(client: OLClient, js: str, event: Event) -> None:  # noqa: ARG001
     """
-    Pretty prints the JSON contents of the event, for troubleshooting business events.
+    Pretty prints the JSON contents of the NOSTR event to assist with troubleshooting.
 
+    :param client: OLClient used
     :param js: The JSON contents to be pretty printed.
-    :param event: The event related to the pprint_handler method.
+    :param event: The event.
     :return: None
+
     """
     pprint.pprint(json.loads(js), indent=2, width=120, sort_dicts=True)  # noqa: T203
 
 
-def print_event_handler(client: OLClient, js: str, event: Event) -> None:
+def print_event_handler(
+    client: OLClient, js: str, event: Event  # noqa: ARG001
+) -> None:
     """
-    Prints the objects using pprinted reprs, for troubleshooting nostr events.
+    Prints the objects using pretty printed representations for troubleshooting nostr events.
     """
     e = copy.copy(event.__dict__)
     try:
@@ -83,7 +87,9 @@ def print_event_handler(client: OLClient, js: str, event: Event) -> None:
     pprint.pprint(e, indent=2, width=120, sort_dicts=True)  # noqa: T203
 
 
-def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> None:
+def print_friendly_keyname_handler(
+    client: OLClient, js: str, event: Event
+) -> None:  # noqa: ARG001
     """
     Print friendly keynames handler in a banner before the next handler fires, based on the .env file.
     """
@@ -103,7 +109,7 @@ def print_friendly_keyname_handler(client: OLClient, js: str, event: Event) -> N
     haystack = {
         pubkey_from_privkey(value): key for key, value in edwh.read_dotenv().items()
     }
-    needle = event._pub_key.lower()
+    needle = event.event_data()["pubkey"].lower()
     name_or_key = haystack.get(needle, needle)
     print(f"---[from: {name_or_key}]-------------")  # noqa: T201
 
@@ -141,7 +147,7 @@ def parse_key(keyname_or_bech32: str | None) -> Keys:
     },
     incrementable="verbose",
 )
-def new(ctx: Context, gidname, key=None, verbose=1):
+def new(ctx: Context, gidname, key=None, verbose=1):  # noqa: ARG001
     """
     Simulates a new object and sends the message over the relay,
     waiting for the client to finish all events and closes the connection.
@@ -160,7 +166,7 @@ def new(ctx: Context, gidname, key=None, verbose=1):
 @task(
     incrementable="verbose",
 )
-def jstagtest(ctx, key=None, verbose=1):
+def jstagtest(ctx: Context, key=None, verbose=1):  # noqa: ARG001
     """ """
     logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
 
@@ -205,12 +211,12 @@ def jstagtest(ctx, key=None, verbose=1):
 
 
 @task(incrementable=["verbose"])
-def connect(context, key=None, verbose=1):
+def connect(context: Context, auth_key=None, verbose=1):  # noqa: ARG001
     """
-    Connect to the relay, listening for messages printing friendly names and message values.
+    Connect to the relay, listening for messages, printing friendly names and message values.
     """
     logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
-    keys = parse_key(key)
+    keys = parse_key(auth_key)
     env = edwh.read_dotenv()
     listen_forever(
         keys=keys,
@@ -224,12 +230,14 @@ def connect(context, key=None, verbose=1):
 
 
 @task(incrementable=["verbose"])
-def d1985(context, key=None, verbose=1):
+def d1985(context: Context, key=None, verbose=1):  # noqa: ARG001
     """
-    Connect to the relay, listening for messages printing friendly names and message values.
+    Connect to the relay, listening for messages, printing friendly names and message values.
     """
 
-    def ignore_ugc_images(client: OLClient, js: str, event: Event) -> None:
+    def ignore_ugc_images(
+        client: OLClient, js: str, event: Event
+    ) -> None:  # noqa: ARG001
         e = []
         for tag_tuple in event.tags:
             if tag_tuple == ["L", "ugc"]:
@@ -260,9 +268,9 @@ def d1985(context, key=None, verbose=1):
 
 
 @task(incrementable=["verbose"])
-def camelcaser(context, key=None, verbose=1):
+def camelcaser(context: Context, key=None, verbose=1):  # noqa: ARG001
     """
-    Connect to the relay, listening for messages printing friendly names and message values.
+    Connect to the relay, listening for messages, printing friendly names and message values.
     """
     logging.basicConfig(level=logging.CRITICAL - 10 * verbose)
     keys = parse_key(key)
@@ -289,7 +297,7 @@ def camelcaser(context, key=None, verbose=1):
 
 
 @task()
-def key(context, name=None):
+def key(context: Context, name=None):  # noqa: ARG001
     """
     Manage key aliases in the .env file. Proposes a new key for unknown entries, always returns prints the value.
     """
@@ -302,6 +310,6 @@ def key(context, name=None):
         )
         print(bech32)
     else:
-        print('Just a random key generated for you:')
+        print("Just a random key generated for you:")
         print(keys.private_key_bech32())
         print(keys.public_key_bech32())
